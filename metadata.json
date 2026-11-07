@@ -1,0 +1,6 @@
+{
+  "name": "Comentosh - Where Conversations Matter",
+  "description": "A modern comment-first social networking platform where thoughtful conversations, replies, and dialogues drive community engagement without post likes.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
