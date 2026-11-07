@@ -5,13 +5,14 @@ import { POPULAR_TOPICS } from '../data/initialData';
 import { ArrowRight, ArrowLeft, Sparkles, Check, Phone, ShieldCheck } from 'lucide-react';
 
 export const SignupPage: React.FC = () => {
-  const { navigateTo, showToast, updateUserProfile } = useApp();
+  const { navigateTo, showToast, registerUser } = useApp();
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [password, setPassword] = useState('');
   const [bio, setBio] = useState('');
   const [selectedTopics, setSelectedTopics] = useState<string[]>(['Software Architecture', 'Design & Craft']);
+  const [isLoading, setIsLoading] = useState(false);
 
   const toggleTopic = (topicName: string) => {
     setSelectedTopics((prev) =>
@@ -19,7 +20,7 @@ export const SignupPage: React.FC = () => {
     );
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !username.trim()) {
       showToast('নাম এবং ইউজারনেম দিন', 'alert');
@@ -34,18 +35,23 @@ export const SignupPage: React.FC = () => {
 
     const formattedPhone = cleanPhone.startsWith('+') ? cleanPhone : `+880 ${cleanPhone}`;
     const cleanUsername = username.trim().replace(/^@+/, '').toLowerCase();
-    const avatarSeed = cleanUsername || Math.random().toString(36).substring(7);
+    setIsLoading(true);
 
-    updateUserProfile({
-      name: name.trim(),
-      username: cleanUsername,
-      phoneNumber: formattedPhone,
-      bio: bio.trim() || 'Passionate thinker and conversationalist on Comentosh.',
-      avatar: `https://api.dicebear.com/7.x/notionists/svg?seed=${avatarSeed}&backgroundColor=e2e8f0`,
-    });
+    try {
+      const success = await registerUser({
+        name: name.trim(),
+        username: cleanUsername,
+        phoneNumber: formattedPhone,
+        password: password || 'comentosh123',
+        bio: bio.trim() || 'Passionate thinker and conversationalist on Comentosh.',
+      });
 
-    showToast(`Welcome to Comentosh, @${cleanUsername}! Account verified with ${formattedPhone}`, 'success');
-    navigateTo('home');
+      if (success) {
+        navigateTo('home');
+      }
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (

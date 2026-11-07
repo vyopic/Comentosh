@@ -4,11 +4,12 @@ import { BrandLogo } from '../components/common/BrandLogo';
 import { Lock, Phone, ArrowRight, ArrowLeft, Sparkles, Check, ShieldCheck } from 'lucide-react';
 
 export const LoginPage: React.FC = () => {
-  const { allUsers, switchUser, navigateTo, showToast, updateUserProfile } = useApp();
+  const { allUsers, switchUser, navigateTo, showToast, loginUser } = useApp();
   const [phoneNumber, setPhoneNumber] = useState('');
   const [password, setPassword] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleFormLogin = (e: React.FormEvent) => {
+  const handleFormLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanPhone = phoneNumber.trim().replace(/[^0-9+]/g, '');
     if (!cleanPhone || cleanPhone.replace(/[^0-9]/g, '').length < 8) {
@@ -17,27 +18,29 @@ export const LoginPage: React.FC = () => {
     }
 
     const formattedPhone = cleanPhone.startsWith('+') ? cleanPhone : `+880 ${cleanPhone}`;
+    setIsLoading(true);
 
-    // Check if matching demo user by phone number or id
-    const existing = allUsers.find(
-      (u) =>
-        (u.phoneNumber && u.phoneNumber.replace(/[^0-9]/g, '').includes(cleanPhone.replace(/[^0-9]/g, ''))) ||
-        cleanPhone.includes(u.username)
-    );
+    try {
+      const success = await loginUser(formattedPhone, password || 'comentosh123');
+      if (success) {
+        navigateTo('home');
+        return;
+      }
 
-    if (existing) {
-      switchUser(existing.id);
-    } else {
-      const shortId = cleanPhone.replace(/[^0-9]/g, '').slice(-4);
-      updateUserProfile({
-        name: `Thinker ${shortId}`,
-        username: `thinker_${shortId}`,
-        phoneNumber: formattedPhone,
-      });
-      showToast(`Logged in successfully with ${formattedPhone}!`, 'success');
+      // Fallback to local demo list
+      const existing = allUsers.find(
+        (u) =>
+          (u.phoneNumber && u.phoneNumber.replace(/[^0-9]/g, '').includes(cleanPhone.replace(/[^0-9]/g, ''))) ||
+          cleanPhone.includes(u.username)
+      );
+
+      if (existing) {
+        switchUser(existing.id);
+        navigateTo('home');
+      }
+    } finally {
+      setIsLoading(false);
     }
-
-    navigateTo('home');
   };
 
   const handleQuickDemoLogin = (userId: string) => {

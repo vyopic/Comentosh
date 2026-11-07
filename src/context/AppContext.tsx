@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, Post, Comment, Reply, NotificationItem, PageView, CommentSortOrder } from '../types';
 import { CURRENT_USER, DEMO_USERS, INITIAL_POSTS, INITIAL_COMMENTS, INITIAL_NOTIFICATIONS } from '../data/initialData';
+import { api } from '../services/api';
 
 interface ToastMessage {
   id: string;
@@ -36,6 +37,14 @@ interface AppContextType {
   switchUser: (userId: string) => void;
   toggleFollowUser: (userId: string) => void;
   updateUserProfile: (updatedFields: Partial<User>) => void;
+  loginUser: (identifier: string, password: string) => Promise<boolean>;
+  registerUser: (data: {
+    username: string;
+    password: string;
+    phoneNumber: string;
+    name?: string;
+    bio?: string;
+  }) => Promise<boolean>;
   logout: () => void;
 
   // Post actions
@@ -123,6 +132,69 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.setItem('comentosh_notifications', JSON.stringify(notifications));
   }, [notifications]);
 
+  // Initial synchronization with Cloudflare D1 Backend
+  useEffect(() => {
+    let isMounted = true;
+
+    async function syncFromBackend() {
+      try {
+        // 1. Check session
+        const meRes = await api.getMe().catch(() => null);
+        if (meRes?.user && isMounted) {
+          setCurrentUser(meRes.user);
+        }
+
+        // 2. Fetch fresh feed
+        const backendPosts = await api.getFeed().catch(() => null);
+        if (backendPosts && backendPosts.length > 0 && isMounted) {
+          setPosts(backendPosts);
+        }
+
+        // 3. Fetch thinkers
+        const backendUsers = await api.getUsers().catch(() => null);
+        if (backendUsers && backendUsers.length > 0 && isMounted) {
+          setAllUsers(backendUsers);
+        }
+
+        // 4. Fetch notifications
+        if (meRes?.user) {
+          const backendNotifs = await api.getNotifications().catch(() => null);
+          if (backendNotifs && isMounted) {
+            setNotifications(backendNotifs);
+          }
+        }
+      } catch (err) {
+        console.warn('[D1 Backend Sync] Fallback to cache:', err);
+      }
+    }
+
+    syncFromBackend();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Fetch comments from Cloudflare D1 whenever selected post changes
+  useEffect(() => {
+    if (!selectedPostId) return;
+    let isMounted = true;
+
+    api.getComments(selectedPostId)
+      .then((backendComments) => {
+        if (backendComments && backendComments.length > 0 && isMounted) {
+          setComments((prev) => {
+            const others = prev.filter((c) => c.postId !== selectedPostId);
+            return [...backendComments, ...others];
+          });
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedPostId]);
+
   const showToast = (message: string, type: 'info' | 'success' | 'alert' = 'info') => {
     const id = Date.now().toString() + Math.random().toString(36).substring(2, 5);
     setToasts((prev) => [...prev, { id, message, type }]);
@@ -163,8 +235,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const loginUser = async (identifier: string, password: string): Promise<boolean> => {
+    try {
+      const res = await api.login(identifier, password);
+      if (res.user) {
+        setCurrentUser(res.user);
+        showToast(`Welcome back, ${res.user.name}!`, 'success');
+        return true;
+      }
+      return false;
+    } catch (err: any) {
+      showToast(err.message || 'Login failed', 'alert');
+      return false;
+    }
+  };
+
+  const registerUser = async (data: {
+    username: string;
+    password: string;
+    phoneNumber: string;
+    name?: string;
+    bio?: string;
+  }): Promise<boolean> => {
+    try {
+      const res = await api.register(data);
+      if (res.user) {
+        setCurrentUser(res.user);
+        showToast(`Welcome to Comentosh, @${res.user.username}!`, 'success');
+        return true;
+      }
+      return false;
+    } catch (err: any) {
+      showToast(err.message || 'Registration failed', 'alert');
+      return false;
+    }
+  };
+
   const logout = () => {
     localStorage.removeItem('comentosh_user');
+    localStorage.removeItem('comentosh_token');
+    api.logout().catch(() => {});
     setCurrentUser(CURRENT_USER);
     setActivePage('login');
     showToast('You have been logged out of your account', 'info');
@@ -185,6 +295,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return u;
       })
     );
+    api.toggleFollow(userId).catch((err) => console.warn('Follow sync error:', err));
   };
 
   const updateUserProfile = (updatedFields: Partial<User>) => {
@@ -228,6 +339,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
 
     showToast('Profile updated successfully', 'success');
+    api.updateProfile(updatedFields).catch((err) => console.warn('Profile sync error:', err));
   };
 
   // Post Operations
@@ -253,6 +365,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       discussionsStarted: prev.discussionsStarted + 1,
     }));
     showToast('Discussion published to Comentosh', 'success');
+
+    // Sync to Cloudflare D1
+    api.createPost(data).then((res) => {
+      if (res.post) {
+        setPosts((prev) => prev.map((p) => (p.id === newPostId ? res.post : p)));
+      }
+    }).catch((err) => console.warn('Create post sync error:', err));
+
     return newPostId;
   };
 
@@ -271,6 +391,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       })
     );
     showToast('Discussion updated', 'success');
+    api.editPost(postId, data).catch((err) => console.warn('Edit post sync error:', err));
   };
 
   const deletePost = (postId: string) => {
@@ -280,6 +401,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setActivePage('home');
     }
     showToast('Discussion removed', 'alert');
+    api.deletePost(postId).catch((err) => console.warn('Delete post sync error:', err));
   };
 
   const toggleSavePost = (postId: string) => {
@@ -293,17 +415,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return p;
       })
     );
+    api.toggleSavePost(postId).catch((err) => console.warn('Toggle save sync error:', err));
   };
 
   const sharePost = (postId: string) => {
     setPosts((prev) =>
       prev.map((p) => (p.id === postId ? { ...p, sharesCount: p.sharesCount + 1 } : p))
     );
-    // Copy link simulated
     if (navigator.clipboard) {
       navigator.clipboard.writeText(`${window.location.origin}/#post-${postId}`);
     }
     showToast('Discussion link copied to clipboard', 'success');
+    api.sharePost(postId).catch((err) => console.warn('Share post sync error:', err));
   };
 
   // Comment Operations
@@ -361,6 +484,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     showToast('Your perspective has been added to the discussion', 'success');
+    api.addComment(postId, content).then((serverComment) => {
+      if (serverComment) {
+        setComments((prev) => prev.map((c) => (c.id === newCommentId ? serverComment : c)));
+      }
+    }).catch((err) => console.warn('Comment sync error:', err));
   };
 
   const editComment = (commentId: string, content: string) => {
@@ -368,6 +496,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       prev.map((c) => (c.id === commentId ? { ...c, content } : c))
     );
     showToast('Comment updated', 'success');
+    api.editComment(commentId, content).catch((err) => console.warn('Edit comment sync error:', err));
   };
 
   const deleteComment = (commentId: string) => {
@@ -389,6 +518,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       })
     );
     showToast('Comment deleted', 'alert');
+    api.deleteComment(commentId).catch((err) => console.warn('Delete comment sync error:', err));
   };
 
   const toggleCommentLike = (commentId: string) => {
@@ -422,6 +552,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return c;
       })
     );
+    api.toggleCommentLike(commentId).catch((err) => console.warn('Like sync error:', err));
   };
 
   // Reply Operations
@@ -486,6 +617,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     showToast('Reply published', 'success');
+    api.addReply(commentId, content).catch((err) => console.warn('Reply sync error:', err));
   };
 
   const toggleReplyLike = (replyId: string) => {
@@ -525,11 +657,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setNotifications((prev) =>
       prev.map((n) => (n.id === notificationId ? { ...n, isRead: true } : n))
     );
+    api.markNotificationRead(notificationId).catch((err) => console.warn('Notif read sync error:', err));
   };
 
   const markAllNotificationsAsRead = () => {
     setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
     showToast('All notifications marked as read', 'info');
+    api.markAllNotificationsRead().catch((err) => console.warn('Notifs read-all sync error:', err));
   };
 
   const unreadNotificationsCount = notifications.filter((n) => !n.isRead).length;
@@ -560,6 +694,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         switchUser,
         toggleFollowUser,
         updateUserProfile,
+        loginUser,
+        registerUser,
         logout,
         createPost,
         editPost,
