@@ -6,6 +6,7 @@ import { MobileHeader } from './components/common/MobileHeader';
 import { MobileBottomNav } from './components/common/MobileBottomNav';
 import { ToastContainer } from './components/common/ToastContainer';
 import { CreatePostModal } from './components/feed/CreatePostModal';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 
 // Pages
 import { HomeFeed } from './pages/HomeFeed';
@@ -102,8 +103,10 @@ const MainContent: React.FC = () => {
 
 export default function App() {
   return (
-    <AppProvider>
-      <MainContent />
-    </AppProvider>
+    <ErrorBoundary>
+      <AppProvider>
+        <MainContent />
+      </AppProvider>
+    </ErrorBoundary>
   );
 }
