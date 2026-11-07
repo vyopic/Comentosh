@@ -48,6 +48,28 @@ export async function handleApiRequest(request: Request, env: Env): Promise<Resp
     return jsonResponse({ error: 'Too many requests. Please slow down.' }, 429, corsHeaders);
   }
 
+  // Check if D1 Database binding is attached
+  if (!env || !env.DB) {
+    if (path === 'health' && method === 'GET') {
+      return jsonResponse(
+        {
+          status: 'ok',
+          database: 'pending_binding',
+          message: 'Cloudflare Worker active. Attach D1 binding "DB" in Cloudflare Pages Settings -> Functions -> D1 Database Bindings.',
+        },
+        200,
+        corsHeaders
+      );
+    }
+    return jsonResponse(
+      {
+        error: 'Cloudflare D1 Database binding "DB" is not attached. Please go to Cloudflare Pages -> Settings -> Functions -> D1 Database Bindings -> Add binding "DB".',
+      },
+      503,
+      corsHeaders
+    );
+  }
+
   // Auto-seed if database is new
   await seedDatabaseIfEmpty(env.DB);
 
