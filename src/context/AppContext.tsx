@@ -22,6 +22,10 @@ interface AppContextType {
   selectedTopic: string | null;
   isCreateModalOpen: boolean;
   toasts: ToastMessage[];
+  isLoadingPosts: boolean;
+  apiError: string | null;
+  refreshFeed: (topic?: string, filter?: string) => Promise<void>;
+  refreshComments: (postId: string) => Promise<void>;
   
   // Navigation actions
   navigateTo: (page: PageView, options?: { postId?: string; userId?: string; topic?: string }) => void;
@@ -114,6 +118,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [selectedTopic, setSelectedTopic] = useState<string | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [isLoadingPosts, setIsLoadingPosts] = useState<boolean>(false);
+  const [apiError, setApiError] = useState<string | null>(null);
+
+  const refreshFeed = async (topic?: string, filter?: string) => {
+    setIsLoadingPosts(true);
+    setApiError(null);
+    try {
+      const feedPosts = await api.getFeed(topic, filter);
+      if (feedPosts) {
+        setPosts(feedPosts);
+      }
+    } catch (err: any) {
+      setApiError(err.message || 'Failed to load feed from Cloudflare D1');
+    } finally {
+      setIsLoadingPosts(false);
+    }
+  };
+
+  const refreshComments = async (postId: string) => {
+    try {
+      const backendComments = await api.getComments(postId);
+      if (backendComments) {
+        setComments((prev) => {
+          const others = prev.filter((c) => c.postId !== postId);
+          return [...backendComments, ...others];
+        });
+      }
+    } catch (err: any) {
+      console.warn('Comments refresh error:', err);
+    }
+  };
 
   // Sync to local storage
   useEffect(() => {
@@ -712,6 +747,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         markNotificationAsRead,
         markAllNotificationsAsRead,
         unreadNotificationsCount,
+        isLoadingPosts,
+        apiError,
+        refreshFeed,
+        refreshComments,
       }}
     >
       {children}
